@@ -35,6 +35,9 @@ THE SOFTWARE.
 #include <sys/socket.h>
 #include <netdb.h>
 
+#define SCREEN_ID "shairport-screen"
+#define WIDGET_TITLE "title"
+#define WIDGET_ARTIST "artist"
 
 // From Stack Overflow, with thanks:
 // http://stackoverflow.com/questions/342409/how-do-i-base64-encode-decode-in-c
@@ -134,10 +137,14 @@ int base64_decode(const char *data,
     return 0;
 }
 
+char **read_lcdproc_response();
 int sockfd;
 struct sockaddr_in serv_addr;
 struct hostent *server;
-char cmd_buffer[1000];
+int lcd_height;
+FILE * fsock;
+static char tokens[100][200];
+
 void connect_to_lcdproc() {
   // Hardcoded host/port for now
   const char *lcdproc_server = "localhost";
@@ -160,9 +167,92 @@ void connect_to_lcdproc() {
       perror("Error connecting to lcdproc server");
       exit(0);
   }
+  printf("Connected to LCDd\n");
+  fsock = fdopen(sockfd, "r+");
   // Send "hello" to LCDd
-  sprintf(cmd_buffer, "hello");
-  write(sockfd, cmd_buffer, strlen(cmd_buffer));
+  fputs("hello\n", fsock);
+  read_lcdproc_response();
+  int i;
+  char *status = tokens[0];
+  if(strcmp(status, "connect") != 0) {
+    printf("Got an unexpected response from LCDd: %s\n", status);
+    exit(0);
+  }
+  for(i = 1; *tokens[i]; i++) {
+      char *tok = tokens[i];
+      printf("Considering token |%s|\n", tok);
+      if(strcmp(tok, "hgt") == 0) {
+        char *hstr = tokens[i+1];
+        if(hstr == NULL) {
+          printf("Could not find height of LCD, assuming 2 lines\n");
+          lcd_height = 2;
+        }
+        else {
+          lcd_height = atoi(hstr);
+          printf("Found LCD height = %d\n", lcd_height);
+        }
+        break;
+      }
+    }
+  // Define screen and widget
+  fprintf(fsock, "screen_add %s\n", SCREEN_ID);
+  read_lcdproc_response();
+  if(strcmp(tokens[0], "success") != 0) {
+    printf("Failed to setup screen");
+    exit(0);
+  }
+  fprintf(fsock, "screen_set %s -name 'Shairplay' -priority foreground\n", SCREEN_ID);
+  read_lcdproc_response();
+  if(strcmp(tokens[0], "success") != 0) {
+    printf("Failed to setup LCD screen: %s\n", tokens[0]);
+    exit(0);
+  }
+  fprintf(fsock, "widget_add %s %s scroller\n", SCREEN_ID, WIDGET_TITLE);
+  read_lcdproc_response();
+  if(strcmp(tokens[0], "success") != 0) {
+    printf("Failed to setup Title widget: %s\n", tokens[0]);
+    exit(0);
+  }
+  fprintf(fsock, "widget_add %s %s scroller\n", SCREEN_ID, WIDGET_ARTIST);
+  read_lcdproc_response();
+  if(strcmp(tokens[0], "success") != 0) {
+    printf("Failed to setup Artist widget: %s\n", tokens[0]);
+    exit(0);
+  }
+  printf("Setup LCDd connection successfully\n");
+
+  // DEBUG
+  fprintf(fsock, "widget_set %s %s 1 1 16 1 h 4 \"A Horse\"\n", SCREEN_ID, WIDGET_TITLE);
+  read_lcdproc_response();
+}
+char **read_lcdproc_response() {
+  char cmd_buffer[1000];
+  int i;
+  for(i=0; i<100; i++) {
+    bzero(tokens[i], 200*sizeof(char));
+  }
+  i = 0;
+  while(fgets(cmd_buffer, 1000, fsock)) {
+    char *tok = strtok(cmd_buffer, " \t\n");
+    printf("Got a response from LCDd: |%s|\n", tok);
+    if(strcmp(tok, "listen") == 0 || strcmp(tok, "ignore") == 0) {
+      printf("Ignoring response: %s\n", tok);
+      continue;
+    }
+    do {
+      strcpy(tokens[i++], tok);
+    }
+    while(tok = strtok(NULL, " \t\n"));
+    return (char **)tokens;
+  }
+}
+
+void setWidgetString(char *widget_id, int line, char *string) {
+  printf("Setting widget %s to string %s\n", widget_id, string);
+  printf("widget_set %s %s 1 %d 16 %d h 4 \"%s\"\n", SCREEN_ID, widget_id, line, line, string);
+  fprintf(fsock, "widget_set %s %s 1 %d 16 %d h 4 \"%s\"\n", SCREEN_ID, widget_id, line, line, string);
+  read_lcdproc_response();
+  printf("GOt response: %s\n", tokens[0]);
 }
 
 int main(void) {
@@ -236,6 +326,7 @@ int main(void) {
             printf("Album Name: \"%s\".\n",payload);
             break;
           case 'asar':
+            setWidgetString(WIDGET_ARTIST, 1, payload);
             printf("Artist: \"%s\".\n",payload);
             break;
           case 'ascm':
@@ -245,6 +336,7 @@ int main(void) {
             printf("Genre: \"%s\".\n",payload);
             break;
           case 'minm':
+            setWidgetString(WIDGET_TITLE, 2, payload);
             printf("Title: \"%s\".\n",payload);
             break;
           case 'ascp':

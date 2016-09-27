@@ -14,7 +14,7 @@ AC_PROG_INSTALL
 # Checks for libraries.
 
 # Checks for header files.
-AC_CHECK_HEADERS([stdint.h stdlib.h string.h sys/time.h unistd.h])
+AC_CHECK_HEADERS([stdint.h stdlib.h string.h sys/time.h unistd.h sys/socket.h netdb.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_SIZE_T
@@ -22,7 +22,7 @@ AC_TYPE_UINT32_T
 
 # Checks for library functions.
 AC_FUNC_MALLOC
-AC_CHECK_FUNCS([memset select])
+AC_CHECK_FUNCS([memset select socket gethostbyaddr fdopen])
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
